@@ -47,13 +47,13 @@ module TConsole
             p paths
           end
 
-          paths.each do |path|
-            p paths
-            require File.realpath(path)
-            p "REQUIRED"
-          end
+          # paths.each do |path|
+          #   p paths
+          #   require File.realpath(path)
+          #   p "REQUIRED"
+          # end
 
-            RSpec::Core::Runner.run paths
+            RSpec::Core::Runner.run globs.flatten
 
           # if defined?(MiniTest)
           #   require File.join(File.dirname(__FILE__), "minitest_handler")

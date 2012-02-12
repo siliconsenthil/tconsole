@@ -112,7 +112,7 @@ module TConsole
         elsif args[0] == "info"
           server.run_info
         else
-          server.run_tests([args[0]], args[1])
+          server.run_tests([args], [])
         end
       end
 
