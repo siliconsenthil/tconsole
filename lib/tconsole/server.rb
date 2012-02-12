@@ -1,12 +1,5 @@
 module TConsole
   class Server
-    attr_accessor :config, :last_result
-
-    def initialize(config)
-      self.config = config
-      self.last_result = TConsole::TestResult.new
-    end
-
     def stop
       DRb.stop_service
     end
@@ -20,23 +13,14 @@ module TConsole
           ENV["RAILS_ENV"] ||= "test"
           $:.unshift("./test")
 
-          # This is definitely based on Sporks rails startup code. I tried initially to use Rake to get things done
-          # and match the test environment a bit better, but it didn't work out well at all
-          # TODO: Figure out how ot get rake db:test:load and rake test:prepare working in this context
-          require "./config/application"
-          ::Rails.application
-          ::Rails::Engine.class_eval do
-            def eager_load!
-              # turn off eager_loading, all together
-            end
-          end
+          require 'rake'
+          Rake.application.init
+          Rake.application.load_rakefile
+          Rake.application.invoke_task("db:test:load")
+          Rake.application.invoke_task("test:prepare")
         rescue Exception => e
-          puts "Error - Loading your environment failed: #{e.message}"
-          if config[:trace] == true
-            puts
-            puts "    #{e.backtrace.join("\n    ")}"
-          end
-
+          puts "Error: Loading your environment failed."
+          puts "    #{e.message}"
           return false
         end
       end
@@ -49,55 +33,40 @@ module TConsole
 
     def run_tests(globs, name_pattern, message = "Running tests...")
       time = Benchmark.realtime do
-        # Pipe for communicating with child so we can get its results back
-        read, write = IO.pipe
-
+            ActiveRecord::Base.establish_connection
+            p "Reconncted"
         fork do
-          read.close
 
           puts message
           puts
 
           paths = []
+          p globs
           globs.each do |glob|
             paths.concat(Dir.glob(glob))
+            p paths
           end
 
           paths.each do |path|
-            require File.expand_path(path)
+            p paths
+            require File.realpath(path)
+            p "REQUIRED"
           end
 
-          if defined? ::ActiveRecord
-            ::ActiveRecord::Base.clear_active_connections!
-            ::ActiveRecord::Base.establish_connection
-          end
+            RSpec::Core::Runner.run paths
 
-          if defined?(::MiniTest)
-            require File.join(File.dirname(__FILE__), "minitest_handler")
+          # if defined?(MiniTest)
+          #   require File.join(File.dirname(__FILE__), "minitest_handler")
 
-            result = MiniTestHandler.run(name_pattern)
-
-            write.puts([Marshal.dump(result)].pack("m"))
-
-          elsif defined?(::Test::Unit)
-            puts "Sorry, but tconsole doesn't support Test::Unit yet"
-            return
-          elsif defined?(::RSpec)
-            puts "Sorry, but tconsole doesn't support RSpec yet"
-            return
-          end
+          #   MiniTestHandler.run(name_pattern)
+          # elsif defined?(Test::Unit)
+          #   puts "Sorry, but tconsole doesn't support Test::Unit yet"
+          #   return
+          # elsif defined?(RSpec)
+          #   puts "Sorry, but tconsole doesn't support RSpec yet"
+          #   return
+          # end
         end
-
-        write.close
-        response = read.read
-        begin
-          self.last_result = Marshal.load(response.unpack("m")[0])
-        rescue
-          # Just in case anything crazy goes down with marshalling
-          self.last_result = TConsole::TestResult.new
-        end
-
-        read.close
 
         Process.waitall
       end
@@ -115,15 +84,6 @@ module TConsole
 
       message = "Running #{files.length} #{files.length == 1 ? "test file" : "test files"} based on changed files..."
       run_tests(files, test_pattern, message)
-    end
-
-    def run_failed
-      # TODO: We probably shouldn't use built in Rails methods here if we can help it
-      file_names = last_result.failure_details.map { |detail| filenameify(detail[:class]) }
-      files_to_rerun = []
-
-      files_to_rerun << file_names.map {|file| (file.match(/controller/)) ? "test/functional/#{file}.rb" : "test/unit/#{file}.rb"}
-      run_tests(files_to_rerun, nil, "Running last failed tests: #{files_to_rerun.join(", ")}")
     end
 
     def recent_files(touched_since, source_pattern, test_path)
@@ -177,25 +137,6 @@ module TConsole
       puts Module.constants.sort.join("\n")
       puts
       puts
-    end
-
-    def filenameify(klass_name)
-      result = ""
-      first = true
-      klass_name.chars do |char|
-        new = char.downcase!
-        if new.nil?
-          result << char
-        elsif first
-          result << new
-        else
-          result << "_#{new}"
-        end
-
-        first = false
-      end
-
-      result
     end
   end
 end

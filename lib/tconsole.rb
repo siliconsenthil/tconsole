@@ -1,35 +1,17 @@
 require "tconsole/version"
 require "tconsole/server"
-require "tconsole/test_result"
 
 require "readline"
 require "benchmark"
 require "drb/drb"
 
-Readline.completion_append_character = ""
-
-# Proc for helping us figure out autocompletes
-Readline.completion_proc = Proc.new do |str|
-  known_commands = TConsole::Console::KNOWN_COMMANDS.grep(/^#{Regexp.escape(str)}/)
-
-  files = Dir[str+'*'].grep(/^#{Regexp.escape(str)}/)
-  formatted_files = files.collect do |filename| 
-    if File.directory?(filename)
-      filename + File::SEPARATOR
-    else
-      filename
-    end
-  end
-
-  known_commands.concat(formatted_files)
-end
-
 module TConsole
   class Runner
 
+    SERVER_URI = "druby://localhost:8788" 
     # Spawns a new environment. Looks at the results of the environment to determine whether to stop or
     # keep running
-    def self.run(argv)
+    def self.run
       stty_save = `stty -g`.chomp
 
       running = true
@@ -37,24 +19,21 @@ module TConsole
 
       # A little welcome
       puts
-      puts "Welcome to tconsole (v#{TConsole::VERSION}). Type 'help' for help or 'exit' to quit."
+      puts "Welcome to tconsole. Type 'help' for help or 'exit' to quit."
 
       # Set up our console input handling and history
       console = Console.new
-
-      # set up the config
-      config = {:trace => false}
-      config[:trace] = true if argv.include?("--trace")
 
       # Start the server
       while running
         # ignore ctrl-c during load, since things can get kind of messy if we don't
 
-        server_pid = fork do
+        fork do
           begin
-            server = Server.new(config)
+            server = Server.new
 
-            drb_server = DRb.start_service("drbunix://tmp/tconsole.#{Process.pid}", server)
+            DRb.start_service(SERVER_URI, server)
+
             DRb.thread.join
           rescue Interrupt
             # do nothing here since the outer process will shut things down for us
@@ -62,7 +41,7 @@ module TConsole
         end
 
         # Set up our client connection to the server
-        server = DRbObject.new_with_uri("drbunix://tmp/tconsole.#{server_pid}")
+        server = DRbObject.new_with_uri(SERVER_URI)
 
         loaded = false
         wait_until = Time.now + 10
@@ -99,7 +78,6 @@ module TConsole
   end
 
   class Console
-    KNOWN_COMMANDS = ["exit", "reload", "help", "units", "functionals", "integration", "recent", "uncommitted", "all", "info", "!failed"]
 
     def initialize
       read_history
@@ -107,10 +85,7 @@ module TConsole
 
     # Returns true if the app should keep running, false otherwise
     def read_and_execute(server)
-      while line = Readline.readline("tconsole> ", false)
-        # TODO: Avoid pushing duplicate commands onto the history
-        Readline::HISTORY << line
-
+      while line = Readline.readline("tconsole> ", true)
         line.strip!
         args = line.split(/\s/)
 
@@ -122,9 +97,9 @@ module TConsole
           return true
         elsif args[0] == "help"
           print_help
-        elsif args[0] == "units" || args[0] == "unit"
+        elsif args[0] == "units"
           server.run_tests(["test/unit/**/*_test.rb"], args[1])
-        elsif args[0] == "functionals" || args[0] == "functional"
+        elsif args[0] == "functionals"
           server.run_tests(["test/functional/**/*_test.rb"], args[1])
         elsif args[0] == "integration"
           server.run_tests(["test/integration/**/*_test.rb"], args[1])
@@ -134,8 +109,6 @@ module TConsole
           server.run_uncommitted(args[1])
         elsif args[0] == "all"
           server.run_tests(["test/unit/**/*_test.rb", "test/functional/**/*_test.rb", "test/integration/**/*_test.rb"], args[1])
-        elsif args[0] == "!failed"
-          server.run_failed
         elsif args[0] == "info"
           server.run_info
         else
@@ -157,10 +130,10 @@ module TConsole
       puts "integration [test_pattern]  # Run integration tests"
       puts "recent [test_pattern]       # Run tests for recently changed files"
       puts "uncommitted [test_pattern]  # Run tests for uncommitted changes"
-      puts "!failed                     # Runs the last set of failing tests"
       puts "[filename] [test_pattern]   # Run the tests contained in the given file"
       puts "reload                      # Reload your Rails environment"
       puts "exit                        # Exit the console"
+      puts
       puts
       puts "Working with test patterns:"
       puts
@@ -179,7 +152,7 @@ module TConsole
     def store_history
       if ENV['HOME']
         File.open(history_file, "w") do |f|
-          Readline::HISTORY.to_a.reverse[0..49].each do |item|
+          Readline::HISTORY.to_a[0..49].each do |item|
             f.puts(item)
           end
         end
@@ -189,12 +162,10 @@ module TConsole
     # Loads history from past sessions
     def read_history
       if ENV['HOME'] && File.exist?(history_file)
-        File.readlines(history_file).reverse.each do |line|
-          Readline::HISTORY << line
+        File.readlines(history_file).each do |line|
+          Readline::HISTORY.push(line)
         end
       end
     end
   end
 end
-
-
