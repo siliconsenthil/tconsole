@@ -33,18 +33,15 @@ module TConsole
 
     def run_tests(globs, name_pattern, message = "Running tests...")
       time = Benchmark.realtime do
-            ActiveRecord::Base.establish_connection
-            p "Reconncted"
+        ActiveRecord::Base.establish_connection
         fork do
 
           puts message
           puts
 
           paths = []
-          p globs
           globs.each do |glob|
             paths.concat(Dir.glob(glob))
-            p paths
           end
 
           # paths.each do |path|
@@ -53,19 +50,7 @@ module TConsole
           #   p "REQUIRED"
           # end
 
-            RSpec::Core::Runner.run globs.flatten
-
-          # if defined?(MiniTest)
-          #   require File.join(File.dirname(__FILE__), "minitest_handler")
-
-          #   MiniTestHandler.run(name_pattern)
-          # elsif defined?(Test::Unit)
-          #   puts "Sorry, but tconsole doesn't support Test::Unit yet"
-          #   return
-          # elsif defined?(RSpec)
-          #   puts "Sorry, but tconsole doesn't support RSpec yet"
-          #   return
-          # end
+          RSpec::Core::Runner.run globs.flatten
         end
 
         Process.waitall
